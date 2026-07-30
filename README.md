@@ -34,7 +34,7 @@ The assignment brief asks for **Universal AQI (UAQI) > 100**. Google’s real UA
 This project therefore:
 
 1. Requests **`LOCAL_AQI`** (forced to `usa_epa` via `customLocalAqis`) as the **primary alert index** — higher-is-worse, `aqi > 100` matches the brief examples (`AQI: 180`).
-2. Still requests **UAQI** for enrichment and as a **fallback** when no local index is returned (notably **Muscat / OM**, which is not listed in Google’s coverage table). Fallback alerts when `UAQI < UAQI_CRITICAL_FLOOR` (default `40`).
+2. Still requests **UAQI** for enrichment and as a **fallback** when a response carries no local index. Fallback alerts when `UAQI < UAQI_CRITICAL_FLOOR` (default `40`). See [Oman coverage](#oman-om-coverage) for why Muscat needs this path.
 3. Documents the primary index on every event: `indexCode` + `scaleDirection`.
 4. Uses **hysteresis** so brief dips around the enter threshold do not clear state or re-alert:
 
@@ -105,6 +105,26 @@ Mock behaviour:
 - **Muscat:** UAQI-only (0–100, lower-is-worse) to exercise the OM fallback path.
 
 Switch to `AQI_PROVIDER=google` and set `GOOGLE_AQI_API_KEY` when billing is available.
+
+### Live API verification
+
+The Google provider was **not exercised against the live API**, because the Air Quality API requires a billing-enabled Google Cloud project. Instead:
+
+- The end-to-end flow is validated with the deterministic **mock provider** (`npm run smoke`).
+- Request shape, response mapping, index selection, and threshold logic are covered by **unit tests** against recorded response structures.
+- Switching to the live API is a config change only (`AQI_PROVIDER=google` + `GOOGLE_AQI_API_KEY`); no code path is mock-specific beyond the provider binding.
+
+### Oman (OM) coverage
+
+Google’s [supported countries table](https://developers.google.com/maps/documentation/air-quality/coverage) does **not currently list Oman**, so a `LOCAL_AQI` index should not be expected for Muscat. The collector handles this as follows:
+
+| Response for Muscat | Behaviour |
+|---------------------|-----------|
+| UAQI present, no local index | UAQI becomes the primary index (`lower_is_worse`), alerting below `UAQI_CRITICAL_FLOOR` |
+| Some other local index present | That index is used and the substitution is logged |
+| No usable index / request rejected | The Muscat poll fails and is logged; **the other three cities are unaffected** (`Promise.allSettled`) |
+
+Mock mode returns UAQI-only data for Muscat so this fallback path is observable in the demo. No synthetic data is injected in `google` mode.
 
 **Secrets:** never commit a real API key. If a live key was shared in a zip/folder, **rotate it** in Google Cloud Console. Compose passes the key only to the **collector**, not the processor.
 

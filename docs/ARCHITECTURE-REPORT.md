@@ -53,6 +53,8 @@ Polling every **10 seconds** while air stays unhealthy would flood the queue. De
 **CI:** GitHub Actions runs format, lint, typecheck, unit tests, coverage, build. A Compose smoke script covers the happy path; deeper black-box E2E remains P2.
 
 **Known limits (intentional for this scope):**
+- The Google provider was **not run against the live API** (billing-enabled project required); validation used the mock provider plus unit tests over response mapping.
+- **Oman is not listed** in Google's coverage table, so Muscat is expected to arrive without a local index — hence the UAQI fallback, with per-city failure isolation if no index is usable.
 - Outbox is **at-least-once** (timeout after broker accept can republish); processor idempotency via unique `eventId` is the defense.
 - Outbox relay is **single-replica** (no `SKIP LOCKED` / claim).
 - Compose persists Postgres only; **RabbitMQ has no volume** — recreate may drop in-flight messages after outbox marks published.
