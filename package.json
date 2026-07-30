@@ -29,7 +29,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "smoke": "bash scripts/smoke-compose.sh"
+    "smoke": "node scripts/smoke-compose.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
