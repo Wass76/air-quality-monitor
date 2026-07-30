@@ -42,6 +42,9 @@ jobs:
         run: npm run build
 
       - name: Prisma validate
+        # Schema-only check; the datasource URL is never connected to.
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
         run: npx prisma validate
 
       - name: Compose config
