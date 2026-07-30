@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+RUN apk add --no-cache openssl python3 make g++
+
+COPY package*.json ./
+COPY nest-cli.json tsconfig.json tsconfig.build.json ./
+COPY prisma ./prisma
+COPY apps ./apps
+COPY libs ./libs
+
+RUN npm ci --prefer-offline --no-audit
+RUN ./node_modules/.bin/prisma generate \
+ && ./node_modules/.bin/nest build collector \
+ && npm prune --omit=dev
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+RUN apk add --no-cache openssl
+
+ENV NODE_ENV=production
+ENV PORT=3001
+
+COPY prisma ./prisma
+
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+
+EXPOSE 3001
+CMD ["node", "dist/apps/collector/main.js"]

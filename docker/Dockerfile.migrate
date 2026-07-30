@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1
+
+FROM node:20-alpine
+WORKDIR /app
+
+RUN apk add --no-cache openssl
+
+COPY package*.json ./
+COPY prisma ./prisma
+RUN npm ci --prefer-offline --no-audit
+
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]

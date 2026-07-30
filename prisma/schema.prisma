@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Alert {
+  id                String   @id @default(uuid())
+  eventId           String   @unique @map("event_id")
+  city              String
+  regionCode        String   @map("region_code")
+  aqi               Int
+  indexCode         String   @map("index_code")
+  scaleDirection    String   @map("scale_direction")
+  uaqi              Int?     @map("uaqi")
+  category          String
+  pm25              Float?   @map("pm25")
+  pm10              Float?   @map("pm10")
+  dominantPollutant String   @map("dominant_pollutant")
+  colorHex          String   @map("color_hex")
+  triggeredBy       String[] @map("triggered_by")
+  observedAt        DateTime @map("observed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([observedAt(sort: Desc)])
+  @@map("alerts")
+}
+
+/// Durable publish intent. Written in the same TX as city dedup state.
+model OutboxMessage {
+  id            String    @id @default(uuid())
+  eventId       String    @unique @map("event_id")
+  aggregateType String    @map("aggregate_type")
+  payload       Json
+  createdAt     DateTime  @default(now()) @map("created_at")
+  publishedAt   DateTime? @map("published_at")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.VarChar(1000)
+  nextAttemptAt DateTime? @map("next_attempt_at")
+  failedAt      DateTime? @map("failed_at")
+
+  @@index([publishedAt, createdAt])
+  @@index([publishedAt, failedAt, nextAttemptAt])
+  @@map("outbox_messages")
+}
+
+/// Per-city dedup / edge-cross state (source of truth for cooldown).
+model CityAlertState {
+  city            String    @id
+  wasExceeding    Boolean   @map("was_exceeding")
+  lastPublishedAt DateTime? @map("last_published_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@map("city_alert_states")
+}

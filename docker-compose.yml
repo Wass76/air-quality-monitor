@@ -1,0 +1,146 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: aqi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aqi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aqi_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-air_quality}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-aqi} -d ${POSTGRES_DB:-air_quality}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aqi-network
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: aqi-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-aqi}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-aqi_secret}
+    ports:
+      - '${RABBITMQ_PORT:-5672}:5672'
+      - '${RABBITMQ_MGMT_PORT:-15672}:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - aqi-network
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.migrate
+    container_name: aqi-migrate
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aqi}:${POSTGRES_PASSWORD:-aqi_secret}@postgres:5432/${POSTGRES_DB:-air_quality}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - aqi-network
+    restart: 'no'
+
+  processor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.processor
+    container_name: aqi-processor
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      LOG_TO_FILE: 'false'
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aqi}:${POSTGRES_PASSWORD:-aqi_secret}@postgres:5432/${POSTGRES_DB:-air_quality}?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-aqi}:${RABBITMQ_PASSWORD:-aqi_secret}@rabbitmq:5672
+    ports:
+      - '${PROCESSOR_PORT:-3002}:3002'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - aqi-network
+
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector
+    container_name: aqi-collector
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      LOG_TO_FILE: 'false'
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aqi}:${POSTGRES_PASSWORD:-aqi_secret}@postgres:5432/${POSTGRES_DB:-air_quality}?schema=public
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-aqi}:${RABBITMQ_PASSWORD:-aqi_secret}@rabbitmq:5672
+      AQI_PROVIDER: ${AQI_PROVIDER:-mock}
+      GOOGLE_AQI_API_KEY: ${GOOGLE_AQI_API_KEY:-}
+      MOCK_CRITICAL_CITIES: ${MOCK_CRITICAL_CITIES:-Dubai,Doha,Muscat}
+      LOCAL_AQI_CODE: ${LOCAL_AQI_CODE:-usa_epa}
+      UAQI_CRITICAL_FLOOR: ${UAQI_CRITICAL_FLOOR:-40}
+      LAQI_RECOVERY: ${LAQI_RECOVERY:-90}
+      UAQI_RECOVERY_FLOOR: ${UAQI_RECOVERY_FLOOR:-50}
+      PM25_RECOVERY: ${PM25_RECOVERY:-90}
+      PM10_RECOVERY: ${PM10_RECOVERY:-135}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-10000}
+      ALERT_COOLDOWN_MS: ${ALERT_COOLDOWN_MS:-300000}
+      OUTBOX_RELAY_INTERVAL_MS: ${OUTBOX_RELAY_INTERVAL_MS:-1000}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
+    ports:
+      - '${COLLECTOR_PORT:-3001}:3001'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      processor:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - aqi-network
+
+volumes:
+  postgres_data:
+
+networks:
+  aqi-network:
+    driver: bridge
